@@ -15,7 +15,7 @@ pub struct RateLimitHeaders {
     pub format: TimestampFormat,
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum TimestampFormat {
     UnixEpoch,
     Iso8601,
