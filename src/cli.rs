@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand};
+use clap_complete::Shell;
 
 #[derive(Parser)]
 #[command(name = "archive-list")]
@@ -6,6 +7,9 @@ use clap::{Parser, Subcommand};
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
+
+    #[arg(long, help = "Generate shell completion for the given shell")]
+    pub completions: Option<Shell>,
 }
 
 #[derive(Subcommand)]
