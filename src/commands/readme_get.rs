@@ -1,7 +1,7 @@
 use crate::cli::ReadmeGetArgs;
 use crate::config::ConfigManager;
 use crate::failure::log_failure;
-use crate::util::{detect_provider, ReverseBufferReader};
+use crate::util::{get_provider_factory, ReverseBufferReader};
 use anyhow::{Context, Result};
 use std::fs;
 use std::path::Path;
@@ -61,16 +61,17 @@ pub async fn readme_get(_args: ReadmeGetArgs) -> Result<()> {
             continue;
         }
 
-        let provider = detect_provider(url).await;
+        let factory = get_provider_factory().await;
+        let provider = match factory.get_provider(url).await {
+            Ok(provider) => provider,
+            Err(e) => {
+                log_failure(url, "INVALID-PROVIDER", fail_file)?;
+                eprintln!("Failed to get provider for {}: {}", url, e);
+                continue;
+            }
+        };
 
-        if provider.is_none() {
-            log_failure(url, "INVALID-PROVIDER", fail_file)?;
-            continue;
-        }
-
-        let provider = provider.unwrap();
-
-        match provider.get_readme_url(url).await {
+        match provider.get_readme(url).await {
             Ok(readme) => {
                 let output_path = url_to_path(url)?;
                 if let Some(parent) = Path::new(&output_path).parent() {

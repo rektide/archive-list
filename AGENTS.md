@@ -12,6 +12,10 @@ bd close <id>         # Complete work
 bd sync               # Sync with git
 ```
 
+## Beads Tool Usage
+
+When updating beads tickets, ALWAYS use the `beads_update` MCP tool directly for notes and status changes. The MCP tool properly handles multi-line text with actual newlines - do NOT use bash/shell tools with escaped `\n` sequences, which render as unreadable literal text in the ticket.
+
 ## Landing the Plane (Session Completion)
 
 **When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.

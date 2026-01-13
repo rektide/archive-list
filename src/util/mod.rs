@@ -2,7 +2,7 @@ pub mod provider_selector;
 pub mod ratelimit;
 pub mod reader;
 
-pub use provider_selector::detect_provider;
+pub use provider_selector::get_provider_factory;
 pub use reader::ReverseBufferReader;
 
 #[allow(dead_code, unused_imports)]
