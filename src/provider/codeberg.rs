@@ -6,6 +6,14 @@ pub struct CodebergProvider;
 
 #[async_trait]
 impl Provider for CodebergProvider {
+    async fn detect(url: &str) -> Option<Box<dyn Provider>> {
+        if url.contains("codeberg.org") {
+            Some(Box::new(CodebergProvider))
+        } else {
+            None
+        }
+    }
+
     async fn get_readme(&self, url: &str) -> Result<String> {
         todo!("Implement Codeberg get_readme");
     }

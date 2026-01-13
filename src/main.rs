@@ -6,7 +6,7 @@ mod provider;
 mod util;
 
 use anyhow::Result;
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 use cli::{Cli, Commands};
 use commands::readme_get::readme_get;
 

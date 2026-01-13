@@ -6,6 +6,14 @@ pub struct HuggingFaceProvider;
 
 #[async_trait]
 impl Provider for HuggingFaceProvider {
+    async fn detect(url: &str) -> Option<Box<dyn Provider>> {
+        if url.contains("huggingface.co") {
+            Some(Box::new(HuggingFaceProvider))
+        } else {
+            None
+        }
+    }
+
     async fn get_readme(&self, url: &str) -> Result<String> {
         todo!("Implement HuggingFace get_readme");
     }

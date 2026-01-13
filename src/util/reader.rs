@@ -77,4 +77,3 @@ impl ReverseBufferReader {
         self.lines_read
     }
 }
-}
