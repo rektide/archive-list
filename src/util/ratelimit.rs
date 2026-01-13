@@ -10,3 +10,8 @@ pub fn create_rate_limiter(requests_per_second: u32) -> RateLimiter<NotKeyed, In
     let quota = Quota::per_second(requests.try_into().unwrap());
     RateLimiter::direct(quota)
 }
+
+pub fn is_ok(rate_limiter: &RateLimiter<NotKeyed, InMemoryState, DefaultClock>) -> bool {
+    rate_limiter.check().is_ok()
+}
+
