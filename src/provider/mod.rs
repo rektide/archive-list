@@ -12,5 +12,7 @@ pub trait Provider: Send + Sync {
         Self: Sized;
 
     async fn get_readme(&self, url: &str) -> anyhow::Result<String>;
-    fn rate_limit(&self) -> u32;
+
+    #[allow(dead_code)]
+    fn name(&self) -> &'static str;
 }

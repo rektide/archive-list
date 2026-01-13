@@ -1,9 +1,22 @@
 use super::Provider;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
+use governor::{
+    clock::DefaultClock,
+    state::{InMemoryState, NotKeyed},
+    Quota, RateLimiter,
+};
+use once_cell::sync::Lazy;
 use reqwest::header;
 
 pub struct CodebergProvider;
+
+static RATE_LIMITER: Lazy<RateLimiter<NotKeyed, InMemoryState, DefaultClock>> = Lazy::new(|| {
+    let velocity = (200_f64 * 1.5) as u32;
+    let requests = u32::max(1, velocity);
+    let quota = Quota::per_second(requests.try_into().unwrap());
+    RateLimiter::direct(quota)
+});
 
 #[async_trait]
 impl Provider for CodebergProvider {
@@ -16,6 +29,10 @@ impl Provider for CodebergProvider {
     }
 
     async fn get_readme(&self, url: &str) -> Result<String> {
+        while RATE_LIMITER.check().is_err() {
+            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+        }
+
         let (owner, repo) = parse_codeberg_url(url)?;
 
         let client = reqwest::Client::new();
@@ -45,8 +62,8 @@ impl Provider for CodebergProvider {
         Ok(content)
     }
 
-    fn rate_limit(&self) -> u32 {
-        200
+    fn name(&self) -> &'static str {
+        "codeberg"
     }
 }
 

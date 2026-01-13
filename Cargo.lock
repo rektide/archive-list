@@ -88,6 +88,7 @@ dependencies = [
  "directories",
  "governor",
  "nonzero_ext",
+ "once_cell",
  "reqwest",
  "serde",
  "tokio",
