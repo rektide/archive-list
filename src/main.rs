@@ -4,6 +4,7 @@ mod config;
 mod failure;
 mod provider;
 mod util;
+mod tests;
 
 use anyhow::Result;
 use clap::{CommandFactory, Parser};

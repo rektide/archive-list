@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct DomainConfig {
     pub env_var: &'static str,
     pub api_pattern: Option<String>,
     pub rate_limit_headers: RateLimitHeaders,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct RateLimitHeaders {
     pub remaining: &'static str,
     pub limit: &'static str,

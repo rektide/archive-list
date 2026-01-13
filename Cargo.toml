@@ -6,6 +6,10 @@ description = "CLI tool to download README files from repositories listed in an 
 license = "MIT"
 repository = "https://github.com/rektide/archive-list"
 
+[[bin]]
+name = "archive-list"
+path = "src/main.rs"
+
 [dependencies]
 anyhow = "1.0"
 async-trait = "0.1"
@@ -26,3 +30,4 @@ chrono = { version = "0.4", features = ["serde"] }
 url = "2.5"
 
 [dev-dependencies]
+tokio-test = "0.4"

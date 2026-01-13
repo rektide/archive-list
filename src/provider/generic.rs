@@ -8,6 +8,7 @@ use chrono::{DateTime, Utc};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+#[derive(Debug)]
 pub struct Provider {
     pub domain: String,
     rate_limiter: Arc<governor::RateLimiter<governor::state::NotKeyed, governor::state::InMemoryState, governor::clock::DefaultClock>>,
@@ -106,7 +107,7 @@ impl Provider {
         Ok(content)
     }
 
-    fn load_tokens(&self) -> Vec<String> {
+    pub fn load_tokens(&self) -> Vec<String> {
         std::env::var(self.config.env_var)
             .unwrap_or_default()
             .split(',')
