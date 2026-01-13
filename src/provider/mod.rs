@@ -1,18 +1,16 @@
-pub mod codeberg;
-pub mod github;
-pub mod gitlab;
-pub mod huggingface;
+pub mod strategy;
+pub mod domain;
+pub mod generic;
+pub mod factory;
+
+pub use factory::ProviderFactory;
+pub use generic::Provider;
+pub use strategy::Strategy;
 
 use async_trait::async_trait;
 
 #[async_trait]
-pub trait Provider: Send + Sync {
-    async fn detect(url: &str) -> Option<Box<dyn Provider>>
-    where
-        Self: Sized;
-
-    async fn get_readme(&self, url: &str) -> anyhow::Result<String>;
-
-    #[allow(dead_code)]
-    fn name(&self) -> &'static str;
+pub trait ProviderTrait: Send + Sync {
+    async fn get_readme_url(&self, url: &str) -> anyhow::Result<String>;
+    async fn fetch_url(&self, url: &str) -> anyhow::Result<reqwest::Response>;
 }

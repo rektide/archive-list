@@ -70,7 +70,7 @@ pub async fn readme_get(_args: ReadmeGetArgs) -> Result<()> {
 
         let provider = provider.unwrap();
 
-        match provider.get_readme(url).await {
+        match provider.get_readme_url(url).await {
             Ok(readme) => {
                 let output_path = url_to_path(url)?;
                 if let Some(parent) = Path::new(&output_path).parent() {
