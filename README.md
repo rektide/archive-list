@@ -33,6 +33,13 @@ downloads README files from every repository in the archlist file. writes into c
 - operates at 1.5x velocity of specified rate with 2s time-base
 - capped by check of provider-specific rate limits via `is_ok()`
 
+**GitHub rate limits:**
+rate limits communicated via response headers. monitors remaining quota via:
+- `x-ratelimit-remaining`: requests remaining in current window
+- `x-ratelimit-limit`: total requests allowed per window
+- `x-ratelimit-reset`: unix timestamp when limit resets
+- `x-ratelimit-used`: requests consumed in current window
+
 ### providers
 
 supports multiple providers:
