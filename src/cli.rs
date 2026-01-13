@@ -19,7 +19,10 @@ pub enum Commands {
 
 #[derive(Parser)]
 pub struct ReadmeGetArgs {
-    #[arg(long, help = "Process archlist from top to bottom instead of bottom to top")]
+    #[arg(
+        long,
+        help = "Process archlist from top to bottom instead of bottom to top"
+    )]
     pub top_down: bool,
 
     #[arg(long, help = "Refresh all URLs even if already downloaded")]

@@ -1,7 +1,7 @@
+pub mod codeberg;
 pub mod github;
 pub mod gitlab;
 pub mod huggingface;
-pub mod codeberg;
 
 use async_trait::async_trait;
 

@@ -1,7 +1,7 @@
+use super::Provider;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use reqwest::header;
-use super::Provider;
 
 pub struct HuggingFaceProvider;
 
@@ -20,14 +20,20 @@ impl Provider for HuggingFaceProvider {
 
         let client = reqwest::Client::new();
         let response = client
-            .get(format!("https://huggingface.co/api/models/{}/raw/README.md", model_id))
+            .get(format!(
+                "https://huggingface.co/api/models/{}/raw/README.md",
+                model_id
+            ))
             .header(header::USER_AGENT, "archive-list")
             .send()
             .await
             .context("Failed to fetch README from HuggingFace API")?;
 
         if !response.status().is_success() {
-            return Err(anyhow::anyhow!("HuggingFace API returned status: {}", response.status()));
+            return Err(anyhow::anyhow!(
+                "HuggingFace API returned status: {}",
+                response.status()
+            ));
         }
 
         let content = response
@@ -54,4 +60,3 @@ fn parse_huggingface_url(url: &str) -> Result<String> {
     let model_id = parts[4..].join("/");
     Ok(model_id)
 }
-

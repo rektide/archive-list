@@ -12,7 +12,7 @@ use commands::readme_get::readme_get;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let mut cli = Cli::parse();
+    let cli = Cli::parse();
 
     if let Some(shell) = cli.completions {
         let mut cmd = Cli::command();

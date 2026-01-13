@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
 use config::{Config, ConfigError, File};
+use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use directories::ProjectDirs;
 
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct AppConfig {

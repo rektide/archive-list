@@ -1,4 +1,4 @@
-use anyhow::{Result, Context};
+use anyhow::{Context, Result};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 
@@ -7,6 +7,7 @@ pub struct ReverseBufferReader {
     buffer: Vec<u8>,
     buffer_pos: usize,
     file_pos: u64,
+    #[allow(dead_code)]
     file_size: u64,
     chunk_size: usize,
     lines_read: usize,
@@ -71,9 +72,5 @@ impl ReverseBufferReader {
         bytes.reverse();
         let line = String::from_utf8(bytes).context("Invalid UTF-8")?;
         Ok(Some(line))
-    }
-
-    pub fn lines_read(&self) -> usize {
-        self.lines_read
     }
 }

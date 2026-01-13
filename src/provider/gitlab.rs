@@ -1,7 +1,7 @@
+use super::Provider;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use reqwest::header;
-use super::Provider;
 
 pub struct GitLabProvider;
 
@@ -20,14 +20,20 @@ impl Provider for GitLabProvider {
 
         let client = reqwest::Client::new();
         let response = client
-            .get(format!("{}/api/v4/projects/{}/repository/files/README.md/raw", base_url, project_id))
+            .get(format!(
+                "{}/api/v4/projects/{}/repository/files/README.md/raw",
+                base_url, project_id
+            ))
             .header(header::USER_AGENT, "archive-list")
             .send()
             .await
             .context("Failed to fetch README from GitLab API")?;
 
         if !response.status().is_success() {
-            return Err(anyhow::anyhow!("GitLab API returned status: {}", response.status()));
+            return Err(anyhow::anyhow!(
+                "GitLab API returned status: {}",
+                response.status()
+            ));
         }
 
         let content = response
@@ -57,4 +63,3 @@ fn parse_gitlab_url(url: &str) -> Result<(String, String)> {
     let encoded_project = urlencoding::encode(&project_path);
     Ok((base, encoded_project.to_string()))
 }
-

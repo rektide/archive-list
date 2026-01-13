@@ -1,7 +1,7 @@
+use super::Provider;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use reqwest::header;
-use super::Provider;
 
 pub struct CodebergProvider;
 
@@ -20,7 +20,10 @@ impl Provider for CodebergProvider {
 
         let client = reqwest::Client::new();
         let response = client
-            .get(format!("https://codeberg.org/api/v1/repos/{}/{}/readme", owner, repo))
+            .get(format!(
+                "https://codeberg.org/api/v1/repos/{}/{}/readme",
+                owner, repo
+            ))
             .header(header::ACCEPT, "application/json")
             .header(header::USER_AGENT, "archive-list")
             .send()
@@ -28,7 +31,10 @@ impl Provider for CodebergProvider {
             .context("Failed to fetch README from Codeberg API")?;
 
         if !response.status().is_success() {
-            return Err(anyhow::anyhow!("Codeberg API returned status: {}", response.status()));
+            return Err(anyhow::anyhow!(
+                "Codeberg API returned status: {}",
+                response.status()
+            ));
         }
 
         let content = response
@@ -57,4 +63,3 @@ fn parse_codeberg_url(url: &str) -> Result<(String, String)> {
 
     Ok((owner, repo))
 }
-

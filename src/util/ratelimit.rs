@@ -4,7 +4,9 @@ use governor::{
     Quota, RateLimiter,
 };
 
-pub fn create_rate_limiter(requests_per_second: u32) -> RateLimiter<NotKeyed, InMemoryState, DefaultClock> {
+pub fn create_rate_limiter(
+    requests_per_second: u32,
+) -> RateLimiter<NotKeyed, InMemoryState, DefaultClock> {
     let velocity = (requests_per_second as f64 * 1.5) as u32;
     let requests = u32::max(1, velocity);
     let quota = Quota::per_second(requests.try_into().unwrap());
@@ -14,4 +16,3 @@ pub fn create_rate_limiter(requests_per_second: u32) -> RateLimiter<NotKeyed, In
 pub fn is_ok(rate_limiter: &RateLimiter<NotKeyed, InMemoryState, DefaultClock>) -> bool {
     rate_limiter.check().is_ok()
 }
-

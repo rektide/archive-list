@@ -1,7 +1,7 @@
+use super::Provider;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use reqwest::header;
-use super::Provider;
 
 pub struct GitHubProvider;
 
@@ -28,7 +28,10 @@ impl Provider for GitHubProvider {
             .context("Failed to fetch README from GitHub API")?;
 
         if !response.status().is_success() {
-            return Err(anyhow::anyhow!("GitHub API returned status: {}", response.status()));
+            return Err(anyhow::anyhow!(
+                "GitHub API returned status: {}",
+                response.status()
+            ));
         }
 
         let content = response
