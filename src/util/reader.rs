@@ -9,6 +9,7 @@ pub struct ReverseBufferReader {
     file_pos: u64,
     file_size: u64,
     chunk_size: usize,
+    lines_read: usize,
 }
 
 impl ReverseBufferReader {
@@ -24,6 +25,7 @@ impl ReverseBufferReader {
             file_pos: file_size,
             file_size,
             chunk_size,
+            lines_read: 0,
         })
     }
 
@@ -65,8 +67,14 @@ impl ReverseBufferReader {
             return Ok(None);
         }
 
+        self.lines_read += 1;
         bytes.reverse();
         let line = String::from_utf8(bytes).context("Invalid UTF-8")?;
         Ok(Some(line))
     }
+
+    pub fn lines_read(&self) -> usize {
+        self.lines_read
+    }
+}
 }
