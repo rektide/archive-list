@@ -88,6 +88,10 @@ pub async fn readme_get(_args: ReadmeGetArgs) -> Result<()> {
                     "NO-README"
                 } else if e.to_string().contains("Not Found") {
                     "NO-REPO"
+                } else if e.to_string().contains("rate limit") || e.to_string().contains("403") || e.to_string().contains("429") {
+                    "RATE-LIMIT"
+                } else if e.to_string().contains("No valid tokens available") {
+                    "NO-TOKENS"
                 } else {
                     "UNKNOWN"
                 };
