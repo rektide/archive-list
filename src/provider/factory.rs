@@ -33,14 +33,7 @@ impl ProviderFactory {
             .ok_or_else(|| anyhow::anyhow!("Unknown domain: {}", domain))?
             .clone();
 
-        let tokens = std::env::var(config.env_var)
-            .unwrap_or_default()
-            .split(',')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect();
-
-        let provider = Arc::new(Provider::new(domain.clone(), config, tokens));
+        let provider = Arc::new(Provider::new(domain.clone(), config));
 
         let mut providers = self.providers.write().await;
         providers.insert(domain.clone(), Arc::clone(&provider));

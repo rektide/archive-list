@@ -91,7 +91,6 @@ impl Provider {
     pub fn new(
         domain: String,
         config: DomainConfig,
-        _tokens: Vec<String>,
     ) -> Self {
         let strategies = create_strategies(&config);
 
