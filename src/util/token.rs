@@ -171,11 +171,9 @@ impl TokenRateLimiter {
                     token.reset_at = reset_at;
                     token.valid = Some(true);
                 }
-            } else {
-                if let Some(token) = tokens_write.get_mut(i) {
-                    token.valid = Some(false);
-                    token.remaining = Some(0);
-                }
+            } else if let Some(token) = tokens_write.get_mut(i) {
+                token.valid = Some(false);
+                token.remaining = Some(0);
             }
         }
     }

@@ -153,9 +153,9 @@ impl Provider {
 
         let headers = response.headers();
 
-        let remaining = parse_header(headers, &self.config.rate_limit_headers.remaining);
-        let limit = parse_header(headers, &self.config.rate_limit_headers.limit);
-        let reset = parse_header(headers, &self.config.rate_limit_headers.reset);
+        let remaining = parse_header(headers, self.config.rate_limit_headers.remaining);
+        let limit = parse_header(headers, self.config.rate_limit_headers.limit);
+        let reset = parse_header(headers, self.config.rate_limit_headers.reset);
 
         if let (Some(rem_str), Some(lim_str)) = (remaining, limit) {
             let rem = rem_str.parse::<u32>()

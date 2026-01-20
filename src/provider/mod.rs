@@ -4,8 +4,6 @@ pub mod generic;
 pub mod factory;
 
 pub use factory::ProviderFactory;
-pub use generic::Provider;
-pub use strategy::Strategy;
 
 use async_trait::async_trait;
 

@@ -73,7 +73,7 @@ impl Strategy for RawGitStrategy {
         "raw-git"
     }
 
-    async fn get_readme_url(&self, domain: &str, url: &str) -> Option<String> {
+    async fn get_readme_url(&self, _domain: &str, url: &str) -> Option<String> {
         let repo_path = extract_repo_path(url)?;
         let parts: Vec<&str> = repo_path.split('/').collect();
         if parts.len() != 2 {
