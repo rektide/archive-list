@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use reqwest::Client;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -72,6 +73,14 @@ impl TokenRateLimiter {
             return None;
         }
 
+        let all_uninitialized = tokens.iter().all(|t| t.valid.is_none());
+        drop(tokens);
+
+        if all_uninitialized {
+            return None;
+        }
+
+        let tokens = self.tokens.read().await;
         let mut attempts = 0;
         while attempts < token_count {
             let index = self.current_index.fetch_add(1, Ordering::SeqCst) % token_count;
@@ -131,5 +140,84 @@ impl TokenRateLimiter {
 
     pub async fn token_count(&self) -> usize {
         self.tokens.read().await.len()
+    }
+
+    pub async fn validate_all_tokens(&self, validation_url: &str, rate_limit_headers: Option<&(String, String, String)>) {
+        let tokens = self.tokens.read().await;
+        if tokens.is_empty() {
+            return;
+        }
+
+        let client = Client::new();
+        let handles: Vec<_> = tokens.iter().map(|token| {
+            let client = client.clone();
+            let token_value = token.value.clone();
+            let validation_url = validation_url.to_string();
+            let rate_limit_headers = rate_limit_headers.map(|h| (h.0.clone(), h.1.clone(), h.2.clone()));
+
+            tokio::spawn(async move {
+                Self::validate_token(&client, &token_value, &validation_url, rate_limit_headers).await
+            })
+        }).collect();
+
+        let results = futures::future::join_all(handles).await;
+
+        let mut tokens_write = self.tokens.write().await;
+        for (i, result) in results.into_iter().enumerate() {
+            if let Ok(Some((remaining, limit, reset_at))) = result {
+                if let Some(token) = tokens_write.get_mut(i) {
+                    token.remaining = Some(remaining);
+                    token.limit = limit;
+                    token.reset_at = reset_at;
+                    token.valid = Some(true);
+                }
+            } else {
+                if let Some(token) = tokens_write.get_mut(i) {
+                    token.valid = Some(false);
+                    token.remaining = Some(0);
+                }
+            }
+        }
+    }
+
+    async fn validate_token(
+        client: &Client,
+        token_value: &str,
+        validation_url: &str,
+        rate_limit_headers: Option<(String, String, String)>,
+    ) -> Option<(u32, u32, Option<DateTime<Utc>>)> {
+        let mut request = client.get(validation_url);
+        request = request.header("Authorization", format!("Bearer {}", token_value));
+
+        let response = request.send().await.ok()?;
+
+        if !response.status().is_success() {
+            return None;
+        }
+
+        if let Some((remaining_header, limit_header, reset_header)) = rate_limit_headers {
+            let remaining = response
+                .headers()
+                .get(&remaining_header)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| s.parse::<u32>().ok())?;
+
+            let limit = response
+                .headers()
+                .get(&limit_header)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| s.parse::<u32>().ok())?;
+
+            let reset_at = response
+                .headers()
+                .get(&reset_header)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| s.parse::<i64>().ok())
+                .map(|ts| DateTime::from_timestamp(ts, 0).unwrap());
+
+            Some((remaining, limit, reset_at))
+        } else {
+            Some((0, 0, None))
+        }
     }
 }

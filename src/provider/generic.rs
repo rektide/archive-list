@@ -53,11 +53,19 @@ impl ProviderTrait for Provider {
             self.token_limiter.load_tokens().await;
         }
 
+        if self.token_limiter.all_tokens_exhausted().await {
+            self.validate_tokens().await;
+        }
+
         while !crate::util::ratelimit::is_ok(&self.rate_limiter) {
             tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
         }
 
         let token = self.token_limiter.get_next_token().await;
+
+        if token.is_none() {
+            return Err(anyhow::anyhow!("No valid tokens available"));
+        }
 
         let working = self.working_strategy.read().await;
         let strategy = working.as_ref()
@@ -112,6 +120,30 @@ impl Provider {
             .await
             .context("Failed to read response content")?;
         Ok(content)
+    }
+
+    async fn validate_tokens(&self) {
+        let validation_url = self.get_validation_url();
+        if let Some(url) = validation_url {
+            let headers = (
+                self.config.rate_limit_headers.remaining.to_string(),
+                self.config.rate_limit_headers.limit.to_string(),
+                self.config.rate_limit_headers.reset.to_string(),
+            );
+            self.token_limiter.validate_all_tokens(&url, Some(&headers)).await;
+        } else {
+            self.token_limiter.validate_all_tokens("", None).await;
+        }
+    }
+
+    fn get_validation_url(&self) -> Option<String> {
+        match self.domain.as_str() {
+            "github.com" => Some("https://api.github.com/user".to_string()),
+            "gitlab.com" => Some("https://gitlab.com/api/v4/user".to_string()),
+            "codeberg.org" => Some("https://codeberg.org/api/v1/user".to_string()),
+            "huggingface.co" => Some("https://huggingface.co/api/whoami".to_string()),
+            _ => None,
+        }
     }
 
     async fn update_token_state(&self, response: &reqwest::Response, token: Option<&str>) -> Result<()> {

@@ -96,6 +96,7 @@ dependencies = [
  "clap_complete",
  "config",
  "directories",
+ "futures",
  "governor",
  "log",
  "nonzero_ext",
