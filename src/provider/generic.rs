@@ -2,6 +2,7 @@ use crate::provider::strategy::Strategy;
 use crate::provider::domain::{DomainConfig, TimestampFormat};
 use crate::provider::ProviderTrait;
 use crate::util::ratelimit::create_rate_limiter;
+use crate::util::TokenRateLimiter;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -15,6 +16,7 @@ pub struct Provider {
     strategies: Vec<Box<dyn Strategy>>,
     working_strategy: Arc<RwLock<Option<Box<dyn Strategy>>>>,
     config: DomainConfig,
+    token_limiter: Arc<TokenRateLimiter>,
 }
 
 #[async_trait]
@@ -47,12 +49,15 @@ impl ProviderTrait for Provider {
     }
 
     async fn fetch_url(&self, url: &str) -> anyhow::Result<reqwest::Response> {
+        if self.token_limiter.token_count().await == 0 {
+            self.token_limiter.load_tokens().await;
+        }
+
         while !crate::util::ratelimit::is_ok(&self.rate_limiter) {
             tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
         }
 
-        let tokens = self.load_tokens();
-        let token = self.get_best_token(&tokens);
+        let token = self.token_limiter.get_next_token().await;
 
         let working = self.working_strategy.read().await;
         let strategy = working.as_ref()
@@ -63,7 +68,7 @@ impl ProviderTrait for Provider {
 
         let response = strategy.get_url(url, token.as_deref()).await?;
 
-        self.parse_rate_limit_headers(&response)?;
+        self.update_token_state(&response, token.as_deref()).await?;
 
         Ok(response)
     }
@@ -88,6 +93,7 @@ impl Provider {
         };
 
         let rate_limiter = Arc::new(create_rate_limiter(requests_per_second));
+        let token_limiter = Arc::new(TokenRateLimiter::new(config.env_var));
 
         Self {
             domain,
@@ -95,6 +101,7 @@ impl Provider {
             strategies,
             working_strategy: Arc::new(RwLock::new(None)),
             config,
+            token_limiter,
         }
     }
 
@@ -107,66 +114,45 @@ impl Provider {
         Ok(content)
     }
 
-    pub fn load_tokens(&self) -> Vec<String> {
-        std::env::var(self.config.env_var)
-            .unwrap_or_default()
-            .split(',')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect()
-    }
+    async fn update_token_state(&self, response: &reqwest::Response, token: Option<&str>) -> Result<()> {
+        let Some(token_value) = token else {
+            return Ok(());
+        };
 
-    fn get_best_token(&self, tokens: &[String]) -> Option<String> {
-        if tokens.is_empty() {
-            return None;
-        }
-        Some(tokens[0].clone())
-    }
-
-    fn parse_rate_limit_headers(&self, response: &reqwest::Response) -> Result<()> {
         let headers = response.headers();
 
-        let remaining = self.parse_header(headers, &self.config.rate_limit_headers.remaining);
-        let limit = self.parse_header(headers, &self.config.rate_limit_headers.limit);
-        let reset = self.parse_header(headers, &self.config.rate_limit_headers.reset);
+        let remaining = parse_header(headers, &self.config.rate_limit_headers.remaining);
+        let limit = parse_header(headers, &self.config.rate_limit_headers.limit);
+        let reset = parse_header(headers, &self.config.rate_limit_headers.reset);
 
-        if let (Some(rem), Some(lim), Some(rst)) = (remaining, limit, reset) {
-            let reset_at = self.parse_reset_timestamp(&rst)?;
+        if let (Some(rem_str), Some(lim_str)) = (remaining, limit) {
+            let rem = rem_str.parse::<u32>()
+                .context("Failed to parse remaining requests")?;
+            let lim = lim_str.parse::<u32>()
+                .context("Failed to parse limit")?;
+
+            let reset_at = if let Some(rst_str) = reset {
+                Some(parse_reset_timestamp(&rst_str, &self.config.rate_limit_headers.format)?)
+            } else {
+                None
+            };
+
+            self.token_limiter.update_token(token_value, rem, lim, reset_at).await;
 
             log::debug!(
                 "Rate limit for {}: remaining={}, limit={}, reset_at={}",
                 self.domain,
                 rem,
                 lim,
-                reset_at
+                reset_at.map(|dt| dt.to_string()).unwrap_or_else(|| "none".to_string())
             );
         }
 
-        Ok(())
-    }
-
-    fn parse_header(&self, headers: &reqwest::header::HeaderMap, header_name: &str) -> Option<String> {
-        let header_name = normalize_header_name(header_name);
-
-        headers
-            .iter()
-            .find(|(name, _)| normalize_header_name(name.as_str()) == header_name)
-            .and_then(|(_, value)| value.to_str().ok().map(|s| s.to_string()))
-    }
-
-    fn parse_reset_timestamp(&self, value: &str) -> Result<DateTime<Utc>> {
-        match self.config.rate_limit_headers.format {
-            TimestampFormat::UnixEpoch => {
-                let timestamp = value.parse::<i64>()
-                    .context("Failed to parse Unix epoch timestamp")?;
-                Ok(DateTime::from_timestamp(timestamp, 0).unwrap())
-            }
-            TimestampFormat::Iso8601 => {
-                DateTime::parse_from_rfc3339(value)
-                    .context("Failed to parse ISO 8601 timestamp")
-                    .map(|dt| dt.with_timezone(&Utc))
-            }
+        if response.status().as_u16() == 403 || response.status().as_u16() == 429 {
+            self.token_limiter.mark_invalid(token_value).await;
         }
+
+        Ok(())
     }
 }
 
@@ -181,6 +167,30 @@ fn create_strategies(config: &DomainConfig) -> Vec<Box<dyn Strategy>> {
     }
 
     strategies
+}
+
+fn parse_header(headers: &reqwest::header::HeaderMap, header_name: &str) -> Option<String> {
+    let header_name = normalize_header_name(header_name);
+
+    headers
+        .iter()
+        .find(|(name, _)| normalize_header_name(name.as_str()) == header_name)
+        .and_then(|(_, value)| value.to_str().ok().map(|s| s.to_string()))
+}
+
+fn parse_reset_timestamp(value: &str, format: &TimestampFormat) -> Result<DateTime<Utc>> {
+    match format {
+        TimestampFormat::UnixEpoch => {
+            let timestamp = value.parse::<i64>()
+                .context("Failed to parse Unix epoch timestamp")?;
+            Ok(DateTime::from_timestamp(timestamp, 0).unwrap())
+        }
+        TimestampFormat::Iso8601 => {
+            DateTime::parse_from_rfc3339(value)
+                .context("Failed to parse ISO 8601 timestamp")
+                .map(|dt| dt.with_timezone(&Utc))
+        }
+    }
 }
 
 fn normalize_header_name(name: &str) -> String {
