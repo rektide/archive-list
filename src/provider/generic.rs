@@ -61,7 +61,10 @@ impl ProviderTrait for Provider {
 
         let (token, governor) = match token_with_gov {
             Some((t, g)) => (Some(t), g),
-            None => return Err(anyhow::anyhow!("No valid tokens available")),
+            None => {
+                log::debug!("{}: No tokens available, proceeding unauthenticated", self.domain);
+                (None, None)
+            }
         };
 
         if let Some(gov) = governor {
