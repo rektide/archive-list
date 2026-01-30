@@ -1,4 +1,4 @@
-use crate::provider::domain::{get_domain_configs, DomainConfig};
+use crate::provider::domain::{get_domain_configs, get_default_config, DomainConfig};
 use crate::provider::generic::Provider;
 use anyhow::{Context, Result};
 use std::collections::HashMap;
@@ -27,11 +27,15 @@ impl ProviderFactory {
         }
         drop(providers);
 
+        // Use known config or generate default for unknown domains
         let config = self
             .domains
             .get(&domain)
-            .ok_or_else(|| anyhow::anyhow!("Unknown domain: {}", domain))?
-            .clone();
+            .cloned()
+            .unwrap_or_else(|| {
+                log::info!("Using default config for unknown domain: {}", domain);
+                get_default_config(&domain)
+            });
 
         let provider = Arc::new(Provider::new(domain.clone(), config));
 

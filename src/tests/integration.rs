@@ -21,15 +21,14 @@ async fn test_provider_factory_creates_provider_for_known_domains() {
 }
 
 #[tokio::test]
-async fn test_unknown_domain_returns_error() {
+async fn test_unknown_domain_uses_default_config() {
     let factory = ProviderFactory::new();
 
     let result = factory.get_provider("https://unknown-domain.com/repo").await;
 
-    assert!(result.is_err(), "Unknown domain should return error");
-    let err = result.unwrap_err();
-    assert!(err.to_string().contains("Unknown domain"),
-        "Error should mention unknown domain");
+    assert!(result.is_ok(), "Unknown domain should use default config");
+    let provider = result.unwrap();
+    assert_eq!(provider.domain, "unknown-domain.com");
 }
 
 #[tokio::test]

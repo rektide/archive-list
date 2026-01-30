@@ -246,9 +246,24 @@ impl TokenRateLimiter {
         self.tokens.read().await.len()
     }
 
-    pub async fn validate_all_tokens(&self, validation_url: &str, rate_limit_headers: Option<&(String, String, String)>) {
+    pub async fn validate_all_tokens(&self, validation_url: &str) {
         let tokens = self.tokens.read().await;
         if tokens.is_empty() {
+            return;
+        }
+
+        // If no validation URL, mark tokens as valid but untested
+        // They'll get real rate limit info from first actual request
+        if validation_url.is_empty() {
+            drop(tokens);
+            let mut tokens_write = self.tokens.write().await;
+            for token in tokens_write.iter_mut() {
+                if token.valid.is_none() {
+                    token.valid = Some(true);
+                    // Leave remaining/limit as None - will use defaults
+                    log::debug!("Token marked valid without validation (no validation URL)");
+                }
+            }
             return;
         }
 
@@ -257,22 +272,22 @@ impl TokenRateLimiter {
             let client = client.clone();
             let token_value = token.value.clone();
             let validation_url = validation_url.to_string();
-            let rate_limit_headers = rate_limit_headers.map(|h| (h.0.clone(), h.1.clone(), h.2.clone()));
 
             tokio::spawn(async move {
-                Self::validate_token(&client, &token_value, &validation_url, rate_limit_headers).await
+                Self::validate_token(&client, &token_value, &validation_url).await
             })
         }).collect();
+        drop(tokens);
 
         let results = futures::future::join_all(handles).await;
 
         let mut tokens_write = self.tokens.write().await;
         for (i, result) in results.into_iter().enumerate() {
-            if let Ok(Some((remaining, limit, reset_at))) = result {
+            if let Ok(Some(info)) = result {
                 if let Some(token) = tokens_write.get_mut(i) {
-                    token.remaining = Some(remaining);
-                    token.limit = limit;
-                    token.reset_at = reset_at;
+                    token.remaining = Some(info.remaining);
+                    token.limit = info.limit;
+                    token.reset_at = info.reset_at;
                     token.valid = Some(true);
                 }
             } else if let Some(token) = tokens_write.get_mut(i) {
@@ -286,8 +301,7 @@ impl TokenRateLimiter {
         client: &Client,
         token_value: &str,
         validation_url: &str,
-        rate_limit_headers: Option<(String, String, String)>,
-    ) -> Option<(u32, u32, Option<DateTime<Utc>>)> {
+    ) -> Option<super::ratelimit_headers::RateLimitInfo> {
         let mut request = client.get(validation_url);
         request = request.header("Authorization", format!("Bearer {}", token_value));
 
@@ -297,29 +311,7 @@ impl TokenRateLimiter {
             return None;
         }
 
-        if let Some((remaining_header, limit_header, reset_header)) = rate_limit_headers {
-            let remaining = response
-                .headers()
-                .get(&remaining_header)
-                .and_then(|v| v.to_str().ok())
-                .and_then(|s| s.parse::<u32>().ok())?;
-
-            let limit = response
-                .headers()
-                .get(&limit_header)
-                .and_then(|v| v.to_str().ok())
-                .and_then(|s| s.parse::<u32>().ok())?;
-
-            let reset_at = response
-                .headers()
-                .get(&reset_header)
-                .and_then(|v| v.to_str().ok())
-                .and_then(|s| s.parse::<i64>().ok())
-                .map(|ts| DateTime::from_timestamp(ts, 0).unwrap());
-
-            Some((remaining, limit, reset_at))
-        } else {
-            Some((0, 0, None))
-        }
+        // Auto-detect rate limit headers from validation response
+        Some(super::ratelimit_headers::detect_rate_limits(response.headers()))
     }
 }

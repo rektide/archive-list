@@ -1,10 +1,9 @@
 use crate::provider::strategy::Strategy;
-use crate::provider::domain::{DomainConfig, TimestampFormat};
+use crate::provider::domain::DomainConfig;
 use crate::provider::ProviderTrait;
-use crate::util::TokenRateLimiter;
+use crate::util::{detect_rate_limits, has_rate_limit_headers, TokenRateLimiter};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -118,17 +117,8 @@ impl Provider {
     }
 
     async fn validate_tokens(&self) {
-        let validation_url = self.get_validation_url();
-        if let Some(url) = validation_url {
-            let headers = (
-                self.config.rate_limit_headers.remaining.to_string(),
-                self.config.rate_limit_headers.limit.to_string(),
-                self.config.rate_limit_headers.reset.to_string(),
-            );
-            self.token_limiter.validate_all_tokens(&url, Some(&headers)).await;
-        } else {
-            self.token_limiter.validate_all_tokens("", None).await;
-        }
+        let validation_url = self.get_validation_url().unwrap_or_default();
+        self.token_limiter.validate_all_tokens(&validation_url).await;
     }
 
     fn get_validation_url(&self) -> Option<String> {
@@ -147,49 +137,37 @@ impl Provider {
         };
 
         let headers = response.headers();
-
-        let remaining = parse_header(headers, self.config.rate_limit_headers.remaining);
-        let limit = parse_header(headers, self.config.rate_limit_headers.limit);
-        let reset = parse_header(headers, self.config.rate_limit_headers.reset);
-
-        if let (Some(rem_str), Some(lim_str)) = (remaining, limit) {
-            let rem = rem_str.parse::<u32>()
-                .context("Failed to parse remaining requests")?;
-            let lim = lim_str.parse::<u32>()
-                .context("Failed to parse limit")?;
-
-            let reset_at = if let Some(ref rst_str) = reset {
-                Some(parse_reset_timestamp(rst_str, &self.config.rate_limit_headers.format)?)
-            } else {
-                None
-            };
-
-            self.token_limiter.update_token(token_value, rem, lim, reset_at).await;
-
-            log::debug!(
-                "Rate limit for {}: remaining={}, limit={}, reset_at={}",
-                self.domain,
-                rem,
-                lim,
-                reset_at.map(|dt| dt.to_string()).unwrap_or_else(|| "none".to_string())
-            );
-        }
-
         let status = response.status().as_u16();
-        
+
+        // Auto-detect rate limit headers from response
+        let rate_info = detect_rate_limits(headers);
+        let has_headers = has_rate_limit_headers(headers);
+
+        // Update token state from detected headers (or defaults)
+        self.token_limiter.update_token(
+            token_value,
+            rate_info.remaining,
+            rate_info.limit,
+            rate_info.reset_at,
+        ).await;
+
+        log::debug!(
+            "Rate limit for {} (detected={}): remaining={}, limit={}, reset_at={}",
+            self.domain,
+            has_headers,
+            rate_info.remaining,
+            rate_info.limit,
+            rate_info.reset_at.map(|dt| dt.to_string()).unwrap_or_else(|| "none".to_string())
+        );
+
         // 401 = auth failure, token is invalid
         if status == 401 {
             self.token_limiter.mark_invalid(token_value).await;
         }
         // 429 = rate limited, token is temporarily exhausted
         // 403 with rate limit headers = also rate limited (GitHub does this)
-        else if status == 429 || (status == 403 && reset.is_some()) {
-            let reset_at = if let Some(rst_str) = reset {
-                parse_reset_timestamp(&rst_str, &self.config.rate_limit_headers.format).ok()
-            } else {
-                None
-            };
-            self.token_limiter.mark_rate_limited(token_value, reset_at).await;
+        else if status == 429 || (status == 403 && has_headers) {
+            self.token_limiter.mark_rate_limited(token_value, rate_info.reset_at).await;
         }
 
         Ok(())
@@ -207,34 +185,4 @@ fn create_strategies(config: &DomainConfig) -> Vec<Box<dyn Strategy>> {
     }
 
     strategies
-}
-
-fn parse_header(headers: &reqwest::header::HeaderMap, header_name: &str) -> Option<String> {
-    let header_name = normalize_header_name(header_name);
-
-    headers
-        .iter()
-        .find(|(name, _)| normalize_header_name(name.as_str()) == header_name)
-        .and_then(|(_, value)| value.to_str().ok().map(|s| s.to_string()))
-}
-
-fn parse_reset_timestamp(value: &str, format: &TimestampFormat) -> Result<DateTime<Utc>> {
-    match format {
-        TimestampFormat::UnixEpoch => {
-            let timestamp = value.parse::<i64>()
-                .context("Failed to parse Unix epoch timestamp")?;
-            Ok(DateTime::from_timestamp(timestamp, 0).unwrap())
-        }
-        TimestampFormat::Iso8601 => {
-            DateTime::parse_from_rfc3339(value)
-                .context("Failed to parse ISO 8601 timestamp")
-                .map(|dt| dt.with_timezone(&Utc))
-        }
-    }
-}
-
-fn normalize_header_name(name: &str) -> String {
-    name.to_lowercase()
-        .trim_start_matches("x-")
-        .replace('-', "_")
 }
