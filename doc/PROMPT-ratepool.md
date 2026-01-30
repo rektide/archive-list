@@ -4,11 +4,7 @@ we want to create a design document markdown file for a new library that does ju
 
 the base implementation should probably be based around `reqwest-ratelimit`, which will require us to implement our own actual rate limit check, which will have to assess the origin and find rate limit.
 
-assess
-
 we need various detection strategies per origin, and to be able to detect which if any apply. keep checking for new rate limits if no rate limit strategy is identified, and use a default governor rate limit of 100r / hr.
-
-please
 
 i'd like to use reqwest middleware such as reqwest-ratelimit , reqwest-tracing in the reqwest-middleware monorepo. we defintely want to use governor crate. use context7 and deepwiki to resekkarch these crates.
 
