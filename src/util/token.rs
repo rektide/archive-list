@@ -1,16 +1,40 @@
 use chrono::{DateTime, Utc};
+use governor::{
+    clock::DefaultClock,
+    state::{InMemoryState, NotKeyed},
+    Quota, RateLimiter,
+};
 use reqwest::Client;
+use std::num::NonZeroU32;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-#[derive(Debug, Clone)]
+type Governor = RateLimiter<NotKeyed, InMemoryState, DefaultClock>;
+
+#[derive(Debug)]
 pub struct Token {
     pub value: String,
     pub valid: Option<bool>,
     pub remaining: Option<u32>,
     pub limit: u32,
     pub reset_at: Option<DateTime<Utc>>,
+    governor: Option<Arc<Governor>>,
+    governor_computed_from: Option<(u32, DateTime<Utc>)>,
+}
+
+impl Clone for Token {
+    fn clone(&self) -> Self {
+        Self {
+            value: self.value.clone(),
+            valid: self.valid,
+            remaining: self.remaining,
+            limit: self.limit,
+            reset_at: self.reset_at,
+            governor: self.governor.clone(),
+            governor_computed_from: self.governor_computed_from,
+        }
+    }
 }
 
 impl Token {
@@ -21,6 +45,8 @@ impl Token {
             remaining: None,
             limit: 0,
             reset_at: None,
+            governor: None,
+            governor_computed_from: None,
         }
     }
 
@@ -30,6 +56,40 @@ impl Token {
             (Some(true), None) => true,
             _ => false,
         }
+    }
+
+    pub fn get_or_rebuild_governor(&mut self, velocity: f64) -> Option<Arc<Governor>> {
+        let (remaining, reset_at) = match (self.remaining, self.reset_at) {
+            (Some(r), Some(t)) => (r, t),
+            _ => return self.governor.clone(),
+        };
+
+        let should_rebuild = match &self.governor_computed_from {
+            None => true,
+            Some((old_rem, old_reset)) => {
+                *old_reset != reset_at || remaining < old_rem.saturating_sub(100)
+            }
+        };
+
+        if should_rebuild {
+            let now = Utc::now();
+            let seconds_until_reset = (reset_at - now).num_seconds().max(1) as f64;
+            let rps = ((remaining as f64 / seconds_until_reset) * velocity).max(1.0) as u32;
+            let rps = NonZeroU32::new(rps.max(1)).unwrap();
+            
+            let quota = Quota::per_second(rps);
+            let new_gov = Arc::new(RateLimiter::direct(quota));
+            
+            self.governor = Some(new_gov);
+            self.governor_computed_from = Some((remaining, reset_at));
+            
+            log::debug!(
+                "Rebuilt governor for token: rps={}, remaining={}, seconds_until_reset={}",
+                rps, remaining, seconds_until_reset
+            );
+        }
+
+        self.governor.clone()
     }
 }
 
@@ -87,6 +147,36 @@ impl TokenRateLimiter {
             if let Some(token) = tokens.get(index) {
                 if token.is_available() {
                     return Some(token.value.clone());
+                }
+            }
+            attempts += 1;
+        }
+
+        None
+    }
+
+    pub async fn get_next_token_with_governor(&self, velocity: f64) -> Option<(String, Option<Arc<Governor>>)> {
+        self.check_reset().await;
+
+        let mut tokens = self.tokens.write().await;
+        let token_count = tokens.len();
+
+        if token_count == 0 {
+            return None;
+        }
+
+        let all_uninitialized = tokens.iter().all(|t| t.valid.is_none());
+        if all_uninitialized {
+            return None;
+        }
+
+        let mut attempts = 0;
+        while attempts < token_count {
+            let index = self.current_index.fetch_add(1, Ordering::SeqCst) % token_count;
+            if let Some(token) = tokens.get_mut(index) {
+                if token.is_available() {
+                    let gov = token.get_or_rebuild_governor(velocity);
+                    return Some((token.value.clone(), gov));
                 }
             }
             attempts += 1;

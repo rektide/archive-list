@@ -1,7 +1,6 @@
 use crate::provider::strategy::Strategy;
 use crate::provider::domain::{DomainConfig, TimestampFormat};
 use crate::provider::ProviderTrait;
-use crate::util::ratelimit::create_rate_limiter;
 use crate::util::TokenRateLimiter;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -9,10 +8,11 @@ use chrono::{DateTime, Utc};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+const DEFAULT_VELOCITY: f64 = 1.5;
+
 #[derive(Debug)]
 pub struct Provider {
     pub domain: String,
-    rate_limiter: Arc<governor::RateLimiter<governor::state::NotKeyed, governor::state::InMemoryState, governor::clock::DefaultClock>>,
     strategies: Vec<Box<dyn Strategy>>,
     working_strategy: Arc<RwLock<Option<Box<dyn Strategy>>>>,
     config: DomainConfig,
@@ -57,14 +57,15 @@ impl ProviderTrait for Provider {
             self.validate_tokens().await;
         }
 
-        while !crate::util::ratelimit::is_ok(&self.rate_limiter) {
-            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-        }
+        let token_with_gov = self.token_limiter.get_next_token_with_governor(DEFAULT_VELOCITY).await;
 
-        let token = self.token_limiter.get_next_token().await;
+        let (token, governor) = match token_with_gov {
+            Some((t, g)) => (Some(t), g),
+            None => return Err(anyhow::anyhow!("No valid tokens available")),
+        };
 
-        if token.is_none() {
-            return Err(anyhow::anyhow!("No valid tokens available"));
+        if let Some(gov) = governor {
+            gov.until_ready().await;
         }
 
         let working = self.working_strategy.read().await;
@@ -93,18 +94,10 @@ impl Provider {
         config: DomainConfig,
     ) -> Self {
         let strategies = create_strategies(&config);
-
-        let requests_per_second = match config.api_pattern.as_deref() {
-            Some(_) => 60,
-            None => 10,
-        };
-
-        let rate_limiter = Arc::new(create_rate_limiter(requests_per_second));
         let token_limiter = Arc::new(TokenRateLimiter::new(config.env_var));
 
         Self {
             domain,
-            rate_limiter,
             strategies,
             working_strategy: Arc::new(RwLock::new(None)),
             config,
