@@ -162,8 +162,8 @@ impl Provider {
             let lim = lim_str.parse::<u32>()
                 .context("Failed to parse limit")?;
 
-            let reset_at = if let Some(rst_str) = reset {
-                Some(parse_reset_timestamp(&rst_str, &self.config.rate_limit_headers.format)?)
+            let reset_at = if let Some(ref rst_str) = reset {
+                Some(parse_reset_timestamp(rst_str, &self.config.rate_limit_headers.format)?)
             } else {
                 None
             };
@@ -179,8 +179,21 @@ impl Provider {
             );
         }
 
-        if response.status().as_u16() == 403 || response.status().as_u16() == 429 {
+        let status = response.status().as_u16();
+        
+        // 401 = auth failure, token is invalid
+        if status == 401 {
             self.token_limiter.mark_invalid(token_value).await;
+        }
+        // 429 = rate limited, token is temporarily exhausted
+        // 403 with rate limit headers = also rate limited (GitHub does this)
+        else if status == 429 || (status == 403 && reset.is_some()) {
+            let reset_at = if let Some(rst_str) = reset {
+                parse_reset_timestamp(&rst_str, &self.config.rate_limit_headers.format).ok()
+            } else {
+                None
+            };
+            self.token_limiter.mark_rate_limited(token_value, reset_at).await;
         }
 
         Ok(())

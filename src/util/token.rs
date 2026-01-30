@@ -119,6 +119,20 @@ impl TokenRateLimiter {
         }
     }
 
+    pub async fn mark_rate_limited(&self, token_value: &str, reset_at: Option<DateTime<Utc>>) {
+        let mut tokens = self.tokens.write().await;
+        if let Some(token) = tokens.iter_mut().find(|t| t.value == token_value) {
+            token.remaining = Some(0);
+            token.valid = Some(true);  // Still valid, just exhausted
+            if let Some(reset) = reset_at {
+                token.reset_at = Some(reset);
+            } else {
+                // Conservative backoff: 60 seconds if no reset time provided
+                token.reset_at = Some(Utc::now() + chrono::Duration::seconds(60));
+            }
+        }
+    }
+
     async fn check_reset(&self) {
         let now = Utc::now();
         let mut tokens = self.tokens.write().await;
