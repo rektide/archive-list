@@ -1,5 +1,7 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
+use reqwest_middleware::ClientWithMiddleware;
+use std::sync::Arc;
 
 #[async_trait]
 pub trait Strategy: Send + Sync + std::fmt::Debug {
@@ -11,6 +13,7 @@ pub trait Strategy: Send + Sync + std::fmt::Debug {
         &self,
         url: &str,
         token: Option<&str>,
+        client: &Arc<ClientWithMiddleware>,
     ) -> Result<reqwest::Response>;
 
     fn clone_box(&self) -> Box<dyn Strategy>;
@@ -43,8 +46,8 @@ impl Strategy for ApiStrategy {
         &self,
         url: &str,
         token: Option<&str>,
+        client: &Arc<ClientWithMiddleware>,
     ) -> Result<reqwest::Response> {
-        let client = reqwest::Client::new();
         let mut request = client.get(url);
 
         if let Some(token) = token {
@@ -86,8 +89,7 @@ impl Strategy for RawGitStrategy {
         ))
     }
 
-    async fn get_url(&self, url: &str, _token: Option<&str>) -> Result<reqwest::Response> {
-        let client = reqwest::Client::new();
+    async fn get_url(&self, url: &str, _token: Option<&str>, client: &Arc<ClientWithMiddleware>) -> Result<reqwest::Response> {
         client
             .get(url)
             .send()
@@ -113,8 +115,7 @@ impl Strategy for HtmlScrapeStrategy {
         Some(url.to_string())
     }
 
-    async fn get_url(&self, url: &str, _token: Option<&str>) -> Result<reqwest::Response> {
-        let client = reqwest::Client::new();
+    async fn get_url(&self, url: &str, _token: Option<&str>, client: &Arc<ClientWithMiddleware>) -> Result<reqwest::Response> {
         let response = client
             .get(url)
             .send()

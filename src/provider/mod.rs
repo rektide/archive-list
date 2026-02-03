@@ -11,4 +11,5 @@ use async_trait::async_trait;
 pub trait ProviderTrait: Send + Sync {
     async fn get_readme_url(&self, url: &str) -> anyhow::Result<String>;
     async fn fetch_url(&self, url: &str) -> anyhow::Result<reqwest::Response>;
+    async fn get_readme(&self, url: &str) -> anyhow::Result<String>;
 }

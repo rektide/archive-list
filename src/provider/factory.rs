@@ -1,6 +1,7 @@
 use crate::provider::domain::{get_domain_configs, get_default_config, DomainConfig};
 use crate::provider::generic::Provider;
 use anyhow::{Context, Result};
+use reqwest_middleware::ClientWithMiddleware;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -8,6 +9,7 @@ use tokio::sync::RwLock;
 pub struct ProviderFactory {
     domains: HashMap<String, DomainConfig>,
     providers: Arc<RwLock<HashMap<String, Arc<Provider>>>>,
+    client: Arc<ClientWithMiddleware>,
 }
 
 impl ProviderFactory {
@@ -15,6 +17,7 @@ impl ProviderFactory {
         Self {
             domains: get_domain_configs(),
             providers: Arc::new(RwLock::new(HashMap::new())),
+            client: crate::util::create_shared_client(),
         }
     }
 
@@ -37,7 +40,11 @@ impl ProviderFactory {
                 get_default_config(&domain)
             });
 
-        let provider = Arc::new(Provider::new(domain.clone(), config));
+        let provider = Arc::new(Provider::new(
+            domain.clone(),
+            config,
+            Arc::clone(&self.client),
+        ));
 
         let mut providers = self.providers.write().await;
         providers.insert(domain.clone(), Arc::clone(&provider));

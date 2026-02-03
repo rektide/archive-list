@@ -1,21 +1,20 @@
 use crate::provider::strategy::Strategy;
 use crate::provider::domain::DomainConfig;
 use crate::provider::ProviderTrait;
-use crate::util::{detect_rate_limits, has_rate_limit_headers, TokenRateLimiter};
+use crate::util::TokenRateLimiter;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
+use reqwest_middleware::ClientWithMiddleware;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-
-const DEFAULT_VELOCITY: f64 = 1.5;
 
 #[derive(Debug)]
 pub struct Provider {
     pub domain: String,
     strategies: Vec<Box<dyn Strategy>>,
     working_strategy: Arc<RwLock<Option<Box<dyn Strategy>>>>,
-    config: DomainConfig,
     token_limiter: Arc<TokenRateLimiter>,
+    client: Arc<ClientWithMiddleware>,
 }
 
 #[async_trait]
@@ -52,23 +51,12 @@ impl ProviderTrait for Provider {
             self.token_limiter.load_tokens().await;
         }
 
-        if self.token_limiter.all_tokens_exhausted().await {
+        let token = if self.token_limiter.all_tokens_exhausted().await {
             self.validate_tokens().await;
-        }
-
-        let token_with_gov = self.token_limiter.get_next_token_with_governor(DEFAULT_VELOCITY).await;
-
-        let (token, governor) = match token_with_gov {
-            Some((t, g)) => (Some(t), g),
-            None => {
-                log::debug!("{}: No tokens available, proceeding unauthenticated", self.domain);
-                (None, None)
-            }
+            self.token_limiter.get_next_token().await
+        } else {
+            self.token_limiter.get_next_token().await
         };
-
-        if let Some(gov) = governor {
-            gov.until_ready().await;
-        }
 
         let working = self.working_strategy.read().await;
         let strategy = working.as_ref()
@@ -77,23 +65,26 @@ impl ProviderTrait for Provider {
             .clone_box();
         drop(working);
 
-        let response = strategy.get_url(url, token.as_deref()).await?;
+        let response = strategy.get_url(url, token.as_deref(), &self.client).await?;
 
-        self.update_token_state(&response, token.as_deref()).await?;
+        if let Some(token_value) = token {
+            self.update_token_state(&response, &token_value).await?;
+        }
 
         Ok(response)
+    }
+
+    async fn get_readme(&self, url: &str) -> Result<String> {
+        let readme_url = self.get_readme_url(url).await?;
+        self.fetch_content(&readme_url).await
     }
 }
 
 impl Provider {
-    pub async fn get_readme(&self, url: &str) -> Result<String> {
-        let readme_url = self.get_readme_url(url).await?;
-        self.fetch_content(&readme_url).await
-    }
-
     pub fn new(
         domain: String,
         config: DomainConfig,
+        client: Arc<ClientWithMiddleware>,
     ) -> Self {
         let strategies = create_strategies(&config);
         let token_limiter = Arc::new(TokenRateLimiter::new(config.env_var));
@@ -102,8 +93,8 @@ impl Provider {
             domain,
             strategies,
             working_strategy: Arc::new(RwLock::new(None)),
-            config,
             token_limiter,
+            client,
         }
     }
 
@@ -131,43 +122,13 @@ impl Provider {
         }
     }
 
-    async fn update_token_state(&self, response: &reqwest::Response, token: Option<&str>) -> Result<()> {
-        let Some(token_value) = token else {
-            return Ok(());
-        };
-
-        let headers = response.headers();
+    async fn update_token_state(&self, response: &reqwest::Response, token_value: &str) -> Result<()> {
         let status = response.status().as_u16();
 
-        // Auto-detect rate limit headers from response
-        let rate_info = detect_rate_limits(headers);
-        let has_headers = has_rate_limit_headers(headers);
-
-        // Update token state from detected headers (or defaults)
-        self.token_limiter.update_token(
-            token_value,
-            rate_info.remaining,
-            rate_info.limit,
-            rate_info.reset_at,
-        ).await;
-
-        log::debug!(
-            "Rate limit for {} (detected={}): remaining={}, limit={}, reset_at={}",
-            self.domain,
-            has_headers,
-            rate_info.remaining,
-            rate_info.limit,
-            rate_info.reset_at.map(|dt| dt.to_string()).unwrap_or_else(|| "none".to_string())
-        );
-
-        // 401 = auth failure, token is invalid
+        // Rate limiting is now handled by reqgov middleware
+        // Only track token validity
         if status == 401 {
             self.token_limiter.mark_invalid(token_value).await;
-        }
-        // 429 = rate limited, token is temporarily exhausted
-        // 403 with rate limit headers = also rate limited (GitHub does this)
-        else if status == 429 || (status == 403 && has_headers) {
-            self.token_limiter.mark_rate_limited(token_value, rate_info.reset_at).await;
         }
 
         Ok(())

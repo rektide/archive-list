@@ -1,8 +1,10 @@
 use crate::cli::ReadmeGetArgs;
 use crate::config::ConfigManager;
 use crate::failure::log_failure;
+use crate::provider::ProviderTrait;
 use crate::util::{get_provider_factory, ReverseBufferReader};
-use anyhow::{Context, Result};
+use anyhow::Result;
+use futures::stream::{self, StreamExt};
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
@@ -50,59 +52,86 @@ pub async fn readme_get(_args: ReadmeGetArgs) -> Result<()> {
         }
     }
 
-    loop {
-        let line = match reader.read_line()? {
-            Some(line) => line,
-            None => break,
-        };
-
-        let url = line.trim();
-        if url.is_empty() || url.starts_with('#') {
-            continue;
-        }
-
-        let factory = get_provider_factory().await;
-        let provider = match factory.get_provider(url).await {
-            Ok(provider) => provider,
-            Err(e) => {
-                log_failure(url, "INVALID-PROVIDER", fail_file)?;
-                eprintln!("Failed to get provider for {}: {}", url, e);
-                continue;
-            }
-        };
-
-        match provider.get_readme(url).await {
-            Ok(readme) => {
-                let output_path = url_to_path(url)?;
-                if let Some(parent) = Path::new(&output_path).parent() {
-                    fs::create_dir_all(parent)?;
-                }
-
-                fs::write(&output_path, readme)
-                    .context(format!("Failed to write README to {}", output_path))?;
-
-                println!("Downloaded README from {}", url);
-            }
-            Err(e) => {
-                let error_code = if e.to_string().contains("404") {
-                    "NO-README"
-                } else if e.to_string().contains("Not Found") {
-                    "NO-REPO"
-                } else if e.to_string().contains("rate limit") || e.to_string().contains("403") || e.to_string().contains("429") {
-                    "RATE-LIMIT"
-                } else if e.to_string().contains("No valid tokens available") {
-                    "NO-TOKENS"
-                } else {
-                    "UNKNOWN"
-                };
-
-                log_failure(url, error_code, fail_file)?;
-                eprintln!("Failed to fetch README from {}: {}", url, e);
-            }
-        }
-
-        *lines_read.lock().await += 1;
+    let mut urls = Vec::new();
+    while let Some(line) = reader.read_line()? {
+        urls.push(line);
     }
+
+    stream::iter(urls)
+        .filter_map(|url| async move {
+            let url = url.trim();
+            if url.is_empty() || url.starts_with('#') {
+                None
+            } else {
+                Some(url.to_string())
+            }
+        })
+        .map(|url| {
+            let lines_read_clone = Arc::clone(&lines_read);
+            async move {
+                let url = url.trim();
+                let fail_file_owned = fail_file.to_string();
+                let url_owned = url.to_string();
+
+                let factory = get_provider_factory().await;
+
+            let provider = match factory.get_provider(&url_owned).await {
+                Ok(provider) => provider,
+                Err(e) => {
+                    let _ = log_failure(&url_owned, "INVALID-PROVIDER", &fail_file_owned);
+                    eprintln!("Failed to get provider for {}: {}", url_owned, e);
+                    *lines_read_clone.lock().await += 1;
+                    return;
+                }
+            };
+
+            match provider.get_readme(&url_owned).await {
+                Ok(readme) => {
+                    let output_path = match url_to_path(&url_owned) {
+                        Ok(path) => path,
+                        Err(e) => {
+                            eprintln!("Failed to create path for {}: {}", url_owned, e);
+                            *lines_read_clone.lock().await += 1;
+                            return;
+                        }
+                    };
+
+                    if let Some(parent) = Path::new(&output_path).parent() {
+                        if let Err(e) = fs::create_dir_all(parent) {
+                            eprintln!("Failed to create directory {}: {}", parent.display(), e);
+                        }
+                    }
+
+                    if let Err(e) = fs::write(&output_path, readme) {
+                        eprintln!("Failed to write README to {}: {}", output_path, e);
+                    } else {
+                        println!("Downloaded README from {}", url_owned);
+                    }
+                }
+                Err(e) => {
+                    let error_code = if e.to_string().contains("404") {
+                        "NO-README"
+                    } else if e.to_string().contains("Not Found") {
+                        "NO-REPO"
+                    } else if e.to_string().contains("rate limit") || e.to_string().contains("403") || e.to_string().contains("429") {
+                        "RATE-LIMIT"
+                    } else if e.to_string().contains("No valid tokens available") {
+                        "NO-TOKENS"
+                    } else {
+                        "UNKNOWN"
+                    };
+
+                    let _ = log_failure(&url_owned, error_code, &fail_file_owned);
+                    eprintln!("Failed to fetch README from {}: {}", url_owned, e);
+                }
+            }
+
+            *lines_read_clone.lock().await += 1;
+        }
+        })
+        .buffer_unordered(10)
+        .collect::<Vec<_>>()
+        .await;
 
     *should_stop.lock().await = true;
 

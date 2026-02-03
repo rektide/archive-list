@@ -1,5 +1,4 @@
 use crate::util::TokenRateLimiter;
-use crate::util::ratelimit::create_rate_limiter;
 use chrono::{Duration, Utc};
 
 #[tokio::test]
@@ -213,12 +212,4 @@ async fn test_rate_limiter_all_tokens_exhausted() {
     assert!(limiter.all_tokens_exhausted().await);
 
     std::env::remove_var("TEST_TOKEN");
-}
-
-#[tokio::test]
-async fn test_governor_rate_limiter() {
-    let rate_limiter = create_rate_limiter(60);
-
-    // Should allow request
-    assert!(crate::util::ratelimit::is_ok(&rate_limiter));
 }
