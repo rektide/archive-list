@@ -28,17 +28,24 @@ downloads README files from every repository in the archlist file. writes into c
 
 ### rate limiting
 
-- designed to download at better than average rate, then pause
-- uses `governor` crate for rate limiting
-- operates at 1.5x velocity of specified rate with 2s time-base
-- capped by check of provider-specific rate limits via `is_ok()`
+- uses `reqgov` library for intelligent HTTP API rate limiting
+- automatically detects and adapts to provider-specific rate limits from response headers
+- uses reqwest-middleware with ConcurrencyRateLimiter and ResponseAdapter
+- processes URLs concurrently with `buffer_unordered(10)` for backpressure control
+- supports per-origin rate limiting (GitHub, GitLab, HuggingFace, Codeberg)
 
-**GitHub rate limits:**
-rate limits communicated via response headers. monitors remaining quota via:
+**Automatic rate limit detection:**
+Rate limits are automatically detected from response headers:
+
+GitHub style:
 - `x-ratelimit-remaining`: requests remaining in current window
 - `x-ratelimit-limit`: total requests allowed per window
 - `x-ratelimit-reset`: unix timestamp when limit resets
-- `x-ratelimit-used`: requests consumed in current window
+
+GitLab style:
+- `ratelimit-remaining`: requests remaining
+- `ratelimit-limit`: total requests allowed
+- `ratelimit-reset`: unix timestamp when limit resets
 
 ### providers
 
