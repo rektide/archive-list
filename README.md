@@ -29,10 +29,11 @@ downloads README files from every repository in the archlist file. writes into c
 ### rate limiting
 
 - uses `reqgov` library for intelligent HTTP API rate limiting
-- automatically detects and adapts to provider-specific rate limits from response headers
-- uses reqwest-middleware with ConcurrencyRateLimiter and ResponseAdapter
+- OriginRegistry provides per-origin rate limiting with automatic quota detection
+- Smoother prevents micro-bursts with 2-second intervals at 1.5x velocity
+- ConcurrencyRateLimiter controls concurrent requests (10 global, 2 per domain)
+- ResponseAdapter auto-detects rate limit headers and configures limiters
 - processes URLs concurrently with `buffer_unordered(10)` for backpressure control
-- supports per-origin rate limiting (GitHub, GitLab, HuggingFace, Codeberg)
 
 **Automatic rate limit detection:**
 Rate limits are automatically detected from response headers:
